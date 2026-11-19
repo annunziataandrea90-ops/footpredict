@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FootPredict AI — ELO, Combo, Value &amp; Diario</title>
+  <title>FootPredict AI — ELO, Sistemi, Value &amp; Diario</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background: #0b1120; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
@@ -19,7 +19,7 @@
           ⚽ FootPredict
           <span id="modeBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">CARICO...</span>
         </h1>
-        <p id="subStatus" class="text-[11px] text-slate-400">Poisson + ELO + Combo • Value &amp; Diario</p>
+        <p id="subStatus" class="text-[11px] text-slate-400">Poisson + ELO + Sistemi • Value &amp; Diario</p>
       </div>
       <div class="flex flex-wrap bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5">
         <button data-tab="ieri" class="tab-btn px-2 py-1 text-xs font-semibold rounded-lg text-slate-300">Ieri</button>
@@ -32,7 +32,6 @@
   </header>
 
   <main class="max-w-3xl mx-auto px-3 mt-3 space-y-3">
-    <!-- PALINSESTO -->
     <div id="viewPalinsesto" class="space-y-3">
       <section id="topHighlights" class="hidden rounded-2xl p-3 bg-gradient-to-br from-emerald-950/80 via-slate-900 to-cyan-950/60 border border-emerald-500/40 space-y-2.5 shadow-lg shadow-emerald-950/30"></section>
 
@@ -86,7 +85,6 @@
       <section id="scheduleContainer" class="space-y-3"></section>
     </div>
 
-    <!-- STORICO 9-12 MESI -->
     <div id="viewStorico" class="hidden space-y-3">
       <section class="glass rounded-2xl p-3.5 space-y-3 border-cyan-500/30">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -135,7 +133,6 @@
       <section id="teamLeaderboard" class="space-y-2"></section>
     </div>
 
-    <!-- DIARIO GIOCATE & ROI -->
     <div id="viewDiario" class="hidden space-y-3">
       <section class="glass rounded-2xl p-3.5 space-y-3 border-amber-500/30">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -148,6 +145,7 @@
             <button id="btnClearDiario" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-rose-300 border border-slate-700 font-semibold text-xs">🗑️</button>
           </div>
         </div>
+        <div id="diarioStatus" class="hidden text-[11px] text-cyan-300"></div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
           <div class="p-2 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">Giocate Chiuse</div><div id="dCount" class="text-sm font-extrabold text-white">0</div></div>
           <div class="p-2 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">Win Rate</div><div id="dWinRate" class="text-sm font-extrabold text-cyan-300">-</div></div>
@@ -166,7 +164,7 @@
         <div class="text-[11px] text-slate-300">Prob. combinata: <strong id="slipProb" class="text-emerald-400">0%</strong> • Quota equa: <strong id="slipOdd" class="text-cyan-300">@1.00</strong></div>
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
-        <button id="slipOpenBtn" class="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold">Vedi</button>
+        <button id="slipOpenBtn" class="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold">Sistemi / Vedi</button>
         <button id="slipClearBtn" title="Svuota schedina" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-rose-300 text-xs font-bold">✕</button>
       </div>
     </div>
@@ -187,5 +185,6 @@
 
   <script src="app1.js"></script>
   <script src="app2.js"></script>
+  <script src="app3.js"></script>
 </body>
 </html>
