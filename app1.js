@@ -1,9 +1,11 @@
 const HIST_KEY = "fp_team_hist_9m";
 const STANDINGS_KEY = "fp_standings_cache_v2";
 const BET_KEY = "fp_bet_log_v1";
+const SLIP_KEY = "fp_slip_v1";
 const MONTH_PREFIX = "fp_m2_";
 const STANDINGS_TTL = 30 * 60 * 1000;
 const EXTRA_RE = /\b(AET|ET|PEN|PENS|PSO|FT-PENS)\b/;
+
 let TEAM_HIST_CACHE = {};
 let standingsCache = {};
 let BET_LOG = [];
@@ -23,18 +25,25 @@ const LEAGUE_TIER = {
   "ita.2": { s: 0.83, elo: 1420 }, "usa.1": { s: 0.84, elo: 1430 }
 };
 
+let dbPromise = null;
 function openDB() {
-  return new Promise((resolve, reject) => {
-    if (!window.indexedDB) return reject(new Error("No IDB"));
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    if (!window.indexedDB) { dbPromise = null; return reject(new Error("No IDB")); }
     const req = indexedDB.open("FootPredictDB", 1);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error("IDB blocked"));
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onclose = () => { dbPromise = null; };
+      resolve(db);
+    };
+    req.onerror = () => { dbPromise = null; reject(req.error); };
+    req.onblocked = () => { dbPromise = null; reject(new Error("IDB blocked")); };
   });
+  return dbPromise;
 }
 
 async function idbGet(key) {
@@ -115,7 +124,26 @@ function sanitizeTeamHist(raw) {
   return clean;
 }
 
+function saveSlip() {
+  try { localStorage.setItem(SLIP_KEY, JSON.stringify(Array.from(SLIP.entries()))); } catch {}
+}
+
+function loadSlip() {
+  try {
+    const raw = localStorage.getItem(SLIP_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      arr.slice(0, 8).forEach(([id, item]) => {
+        if (id && item && typeof item.code === "string" && Number.isFinite(item.prob)) SLIP.set(id, item);
+      });
+    }
+  } catch {}
+}
+
 async function initStorage() {
+  loadSlip();
+  renderSlipBar();
   try {
     const [histIdb, stdIdb, betIdb] = await Promise.all([idbGet(HIST_KEY), idbGet(STANDINGS_KEY), idbGet(BET_KEY)]);
     if (histIdb && typeof histIdb === "object") {
@@ -266,23 +294,31 @@ function isHit(code, h, a) {
 
 function getTeamAdj(teamId) {
   const th = getTeamHist()[teamId];
-  if (!th || th.tot < 5) return { attFactor: 1.0, defFactor: 1.0, elo: th?.elo ?? null };
+  if (!th) return { attFactor: 1.0, defFactor: 1.0, elo: null };
+  const elo = Number.isFinite(th.elo) ? th.elo : null;
+  if (th.tot < 5) return { attFactor: 1.0, defFactor: 1.0, elo };
+
   const recent = Array.isArray(th.m) ? th.m.slice(-15) : [];
+  const lastDate = recent.length ? Date.parse(recent[recent.length - 1].d) : 0;
+  if (lastDate && (Date.now() - lastDate) > 45 * 86400000) {
+    return { attFactor: 1.0, defFactor: 1.0, elo };
+  }
+
   const hasDetailed = recent.length >= 5 && recent.every(x => Number.isFinite(x.gf) && Number.isFinite(x.egf));
   let attFactor = 1.0, defFactor = 1.0;
   if (hasDetailed) {
     let rGf = 0, rGa = 0, rEgf = 0, rEga = 0;
     recent.forEach(x => { rGf += x.gf; rGa += x.ga; rEgf += x.egf; rEga += x.ega; });
-    attFactor = clamp((rGf + 3.0) / Math.max(1.0, rEgf + 3.0), 0.85, 1.15);
-    defFactor = clamp((rGa + 3.0) / Math.max(1.0, rEga + 3.0), 0.85, 1.15);
+    attFactor = clamp((rGf + 4.0) / Math.max(1.0, rEgf + 4.0), 0.90, 1.10);
+    defFactor = clamp((rGa + 4.0) / Math.max(1.0, rEga + 4.0), 0.90, 1.10);
   } else if (th.egf > 0 && th.ega > 0) {
-    attFactor = clamp((th.gf + 4.0) / Math.max(1.0, th.egf + 4.0), 0.85, 1.15);
-    defFactor = clamp((th.ga + 4.0) / Math.max(1.0, th.ega + 4.0), 0.85, 1.15);
+    attFactor = clamp((th.gf + 5.0) / Math.max(1.0, th.egf + 5.0), 0.90, 1.10);
+    defFactor = clamp((th.ga + 5.0) / Math.max(1.0, th.ega + 5.0), 0.90, 1.10);
   }
   return {
     attFactor: Number(safeNum(attFactor, 1.0).toFixed(3)),
     defFactor: Number(safeNum(defFactor, 1.0).toFixed(3)),
-    elo: Number.isFinite(th.elo) ? th.elo : null
+    elo
   };
 }
 
@@ -369,8 +405,8 @@ function calcPred(m, ov = {}, useCal = true) {
   const eGoals = pickEdge(bestGoals.code, bestGoals.prob);
 
   let bestPick;
-  if (best1X2.prob >= 0.56) {
-    bestPick = (bestGoals.prob >= 0.66 && eGoals > e1X2 * 1.05) ? bestGoals : best1X2;
+  if (best1X2.prob >= 0.59) {
+    bestPick = (bestGoals.prob >= 0.67 && eGoals > e1X2 * 1.05) ? bestGoals : best1X2;
   } else {
     bestPick = (eGoals >= eDC * 0.90) ? bestGoals : bestDC;
   }
