@@ -1,10 +1,26 @@
+```javascript
 const HIST_KEY = "fp_team_hist_9m";
 const STANDINGS_KEY = "fp_standings_cache_v2";
 const BET_KEY = "fp_bet_log_v1";
 const SLIP_KEY = "fp_slip_v1";
-const MONTH_PREFIX = "fp_m2_";
 const STANDINGS_TTL = 30 * 60 * 1000;
 const EXTRA_RE = /\b(AET|ET|PEN|PENS|PSO|FT-PENS)\b/;
+
+const COMPS = [
+  ["ita.1", "Serie A", "Campionato", "🇮🇹"], ["ita.2", "Serie B", "Campionato", "🇮🇹"], ["ita.coppa_italia", "Coppa Italia", "Coppa", "🇮🇹"],
+  ["eng.1", "Premier League", "Campionato", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.2", "Championship", "Campionato", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.fa", "FA Cup", "Coppa", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.league_cup", "EFL Cup", "Coppa", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"],
+  ["esp.1", "La Liga", "Campionato", "🇪🇸"], ["esp.copa_del_rey", "Copa del Rey", "Coppa", "🇪🇸"],
+  ["ger.1", "Bundesliga", "Campionato", "🇩🇪"], ["ger.dfb_pokal", "DFB-Pokal", "Coppa", "🇩🇪"],
+  ["fra.1", "Ligue 1", "Campionato", "🇫🇷"], ["fra.coupe_de_france", "Coupe de France", "Coppa", "🇫🇷"],
+  ["ned.1", "Eredivisie", "Campionato", "🇳🇱"], ["por.1", "Liga Portugal", "Campionato", "🇵🇹"],
+  ["tur.1", "Süper Lig", "Campionato", "🇹🇷"], ["bel.1", "Pro League", "Campionato", "🇧🇪"], ["sco.1", "Premiership", "Campionato", "🏴󠁧󠁢󠁳󠁣󠁴󠁿"],
+  ["uefa.champions", "Champions League", "Coppa", "🏆"], ["uefa.europa", "Europa League", "Coppa", "🏆"], ["uefa.europa.conf", "Conference League", "Coppa", "🏆"],
+  ["uefa.nations", "Nations League", "Nazionali", "🌍"], ["fifa.worldq.uefa", "Qual. Mondiali UEFA", "Nazionali", "🌍"],
+  ["caf.nations", "Coppa d'Africa", "Nazionali", "🌍"], ["fifa.friendly", "Amichevoli Int.", "Nazionali", "🌍"],
+  ["bra.1", "Brasileirão", "Campionato", "🇧🇷"], ["arg.1", "Liga Profesional", "Campionato", "🇦🇷"], ["usa.1", "MLS", "Campionato", "🇺🇸"]
+];
+const AM_LEAGUES = new Set(["bra.1", "arg.1", "usa.1"]);
+const MONTH_PREFIX = `fp_m3_${COMPS.length}_`;
 
 let TEAM_HIST_CACHE = {};
 let standingsCache = {};
@@ -188,7 +204,7 @@ async function persistStandingsCache() {
 
 async function clearTeamHist() {
   TEAM_HIST_CACHE = {};
-  try { await idbDel(HIST_KEY); await idbDelByPrefix(MONTH_PREFIX); } catch {}
+  try { await idbDel(HIST_KEY); await idbDelByPrefix("fp_m"); } catch {}
   try { localStorage.removeItem(HIST_KEY); } catch {}
 }
 
@@ -214,21 +230,6 @@ async function mapWithConcurrency(items, limit, fn) {
   await Promise.all(workers);
   return results;
 }
-
-const COMPS = [
-  ["ita.1", "Serie A", "Campionato", "🇮🇹"], ["ita.2", "Serie B", "Campionato", "🇮🇹"], ["ita.coppa_italia", "Coppa Italia", "Coppa", "🇮🇹"],
-  ["eng.1", "Premier League", "Campionato", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.2", "Championship", "Campionato", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.fa", "FA Cup", "Coppa", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["eng.league_cup", "EFL Cup", "Coppa", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"],
-  ["esp.1", "La Liga", "Campionato", "🇪🇸"], ["esp.copa_del_rey", "Copa del Rey", "Coppa", "🇪🇸"],
-  ["ger.1", "Bundesliga", "Campionato", "🇩🇪"], ["ger.dfb_pokal", "DFB-Pokal", "Coppa", "🇩🇪"],
-  ["fra.1", "Ligue 1", "Campionato", "🇫🇷"], ["fra.coupe_de_france", "Coupe de France", "Coppa", "🇫🇷"],
-  ["ned.1", "Eredivisie", "Campionato", "🇳🇱"], ["por.1", "Liga Portugal", "Campionato", "🇵🇹"],
-  ["tur.1", "Süper Lig", "Campionato", "🇹🇷"], ["bel.1", "Pro League", "Campionato", "🇧🇪"], ["sco.1", "Premiership", "Campionato", "🏴󠁧󠁢󠁳󠁣󠁴󠁿"],
-  ["uefa.champions", "Champions League", "Coppa", "🏆"], ["uefa.europa", "Europa League", "Coppa", "🏆"], ["uefa.europa.conf", "Conference League", "Coppa", "🏆"],
-  ["uefa.nations", "Nations League", "Nazionali", "🌍"], ["fifa.worldq.uefa", "Qual. Mondiali UEFA", "Nazionali", "🌍"],
-  ["caf.nations", "Coppa d'Africa", "Nazionali", "🌍"], ["fifa.friendly", "Amichevoli Int.", "Nazionali", "🌍"],
-  ["bra.1", "Brasileirão", "Campionato", "🇧🇷"], ["arg.1", "Liga Profesional", "Campionato", "🇦🇷"], ["usa.1", "MLS", "Campionato", "🇺🇸"]
-];
-const AM_LEAGUES = new Set(["bra.1", "arg.1", "usa.1"]);
 
 const ESPNProvider = {
   async fetchWithTimeout(url, ms = 5000) {
@@ -266,7 +267,7 @@ const safeNum = (v, fb) => Number.isFinite(v) ? v : fb;
 const shrink = (val, gp, leagueAvg, priorWeight = 5) => (val * gp + leagueAvg * priorWeight) / (gp + priorWeight);
 const damp = (f, power = 0.5) => Math.pow(clamp(safeNum(f, 1.0), 0.5, 1.8), power);
 const fairOdd = p => (1 / Math.max(0.02, p)).toFixed(2);
-const PICK_BASELINES = { "1": 0.38, "2": 0.38, "X": 0.28, "1X": 0.68, "X2": 0.68, "Over 2.5": 0.50, "Under 2.5": 0.50, "Gol": 0.50, "No Gol": 0.50 };
+const PICK_BASELINES = { "1": 0.44, "2": 0.29, "X": 0.27, "1X": 0.72, "X2": 0.56, "Over 2.5": 0.50, "Under 2.5": 0.50, "Gol": 0.50, "No Gol": 0.50 };
 const pickEdge = (code, prob) => { const b = PICK_BASELINES[code] ?? 0.50; return Math.max(0, (prob - b) / (1 - b)); };
 
 function isHit(code, h, a) {
@@ -324,8 +325,9 @@ function getTeamAdj(teamId) {
 
 function calcPred(m, ov = {}, useCal = true) {
   const hL = safeNum(ov.hL ?? m.stats.hL, 1.0), aL = safeNum(ov.aL ?? m.stats.aL, 1.0);
-  const adjH = useCal && st.autoCal && m.homeId ? getTeamAdj(m.homeId) : { attFactor: 1.0, defFactor: 1.0, elo: null };
-  const adjA = useCal && st.autoCal && m.awayId ? getTeamAdj(m.awayId) : { attFactor: 1.0, defFactor: 1.0, elo: null };
+  const neutralAdj = { attFactor: 1.0, defFactor: 1.0, elo: null };
+  const adjH = (useCal && st.autoCal) ? (m.stats.adjH ?? (m.homeId ? getTeamAdj(m.homeId) : neutralAdj)) : neutralAdj;
+  const adjA = (useCal && st.autoCal) ? (m.stats.adjA ?? (m.awayId ? getTeamAdj(m.awayId) : neutralAdj)) : neutralAdj;
   const avgH = safeNum(m.stats.avgH, 1.48), avgA = safeNum(m.stats.avgA, 1.18);
   const hGF = safeNum(m.stats.hGF, avgH), hGA = safeNum(m.stats.hGA, avgA);
   const aGF = safeNum(m.stats.aGF, avgA), aGA = safeNum(m.stats.aGA, avgH);
@@ -335,9 +337,13 @@ function calcPred(m, ov = {}, useCal = true) {
   if (useCal && st.autoCal) {
     const eloH = safeNum(m.stats.eloH, adjH.elo);
     const eloA = safeNum(m.stats.eloA, adjA.elo);
-    if (Number.isFinite(eloH) && Number.isFinite(eloA)) {
+    if (Number.isFinite(eloH) || Number.isFinite(eloA)) {
+      const defEloH = LEAGUE_TIER[m.stats.domSlugH || m.slug]?.elo ?? 1470;
+      const defEloA = LEAGUE_TIER[m.stats.domSlugA || m.slug]?.elo ?? 1470;
+      const effEloH = Number.isFinite(eloH) ? eloH : defEloH;
+      const effEloA = Number.isFinite(eloA) ? eloA : defEloA;
       const wt = m.stats.isCrossLeague ? 0.18 : 0.06;
-      eloMult = clamp(Math.pow(10, ((eloH - eloA) / 400) * wt), 0.78, 1.28);
+      eloMult = clamp(Math.pow(10, ((effEloH - effEloA) / 400) * wt), 0.78, 1.28);
     } else if (m.stats.isCrossLeague && m.stats.tierH && m.stats.tierA) {
       eloMult = clamp(Math.pow(m.stats.tierH / m.stats.tierA, 1.2), 0.84, 1.19);
     }
@@ -405,7 +411,7 @@ function calcPred(m, ov = {}, useCal = true) {
   const eGoals = pickEdge(bestGoals.code, bestGoals.prob);
 
   let bestPick;
-  if (best1X2.prob >= 0.59) {
+  if (best1X2.prob >= 0.58) {
     bestPick = (bestGoals.prob >= 0.67 && eGoals > e1X2 * 1.05) ? bestGoals : best1X2;
   } else {
     bestPick = (eGoals >= eDC * 0.90) ? bestGoals : bestDC;
@@ -494,6 +500,8 @@ async function fetchStandings(slug, leagueName = "") {
 
         const obj = {
           played: gp, gfAvg: gf / gp, gaAvg: ga / gp,
+          hGp: (Number.isFinite(hGp) && hGp >= 3) ? hGp : null,
+          aGp: (Number.isFinite(aGp) && aGp >= 3) ? aGp : null,
           hGfAvg: splitAvg(hGf, hGp), hGaAvg: splitAvg(m.homeGoalsAgainst ?? m.homePointsAgainst, hGp),
           aGfAvg: splitAvg(aGf, aGp), aGaAvg: splitAvg(m.awayGoalsAgainst ?? m.awayPointsAgainst, aGp),
           rank: Number.isFinite(m.rank) ? m.rank : "-", source: leagueName || slug, domSlug: slug
@@ -524,7 +532,7 @@ function resolveTeamStats(teamId, localTable, kind = "Campionato") {
   const isLeague = kind === "Campionato", isClubCup = kind === "Coppa";
   const local = localTable[teamId], dom = GLOBAL_TEAM_STATS[teamId];
   if (isLeague && local && local.played >= 3) return { ...local, kind: "local" };
-  if (isClubCup && dom && dom.played >= 6 && (!local || local.played < 6)) return { ...dom, kind: "league" };
+  if (isClubCup && dom && dom.played >= 6 && (!local || dom.played >= local.played)) return { ...dom, kind: "league" };
   if (local && local.played >= 3) return { ...local, kind: "local" };
   if (isClubCup && dom && dom.played >= 3) return { ...dom, kind: "league" };
   const th = getTeamHist()[teamId];
