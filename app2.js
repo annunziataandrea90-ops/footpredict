@@ -53,7 +53,8 @@ async function loadDay(offset, force = false) {
       if (AM_LEAGUES.has(slug)) {
         const prevEv = await fetchScoreboardDay(slug, dpPrev, diag);
         const evMap = new Map();
-        prevEv.concat(events).forEach(ev => evMap.set(ev.id, ev));
+        prevEv.forEach(ev => { ev._espnDp = dpPrev; evMap.set(ev.id, ev); });
+        events.forEach(ev => { ev._espnDp = dp; evMap.set(ev.id, ev); });
         events = Array.from(evMap.values()).filter(ev => localDateKey(new Date(ev.date)) === tKey);
       }
       doneBoards++;
@@ -95,8 +96,11 @@ async function loadDay(offset, force = false) {
         const timeStr = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
 
         const statusObj = ev.status?.type || {}, statusName = statusObj.name || "";
-        const shortDet = (statusObj.shortDetail || "").toUpperCase(), isExtra = EXTRA_RE.test(shortDet);
-        const isCanceled = statusName === "STATUS_POSTPONED" || statusName === "STATUS_CANCELED" || (statusObj.state === "post" && statusObj.completed === false);
+        const shortDet = (statusObj.shortDetail || "").toUpperCase();
+        const isExtra = EXTRA_RE.test(shortDet) || Number(ev.status?.period) > 2;
+        const isCanceled = statusName === "STATUS_POSTPONED" || statusName === "STATUS_CANCELED"
+          || statusName === "STATUS_ABANDONED" || statusName === "STATUS_SUSPENDED"
+          || (statusObj.state === "post" && statusObj.completed === false);
         const stateType = isCanceled ? "canceled" : (statusObj.state || "pre");
         const hasScore = home.score !== undefined && home.score !== "" && away.score !== undefined && away.score !== ""
           && Number.isFinite(Number(home.score)) && Number.isFinite(Number(away.score));
@@ -105,7 +109,7 @@ async function loadDay(offset, force = false) {
         let statusTxt = "PRE";
         if (stateType === "in") statusTxt = ev.status?.displayClock || "LIVE";
         else if (stateType === "post") statusTxt = isExtra ? (/\b(PEN|PENS|PSO|FT-PENS)\b/.test(shortDet) ? "RIG" : "SUPPL") : "FIN";
-        else if (stateType === "canceled") statusTxt = statusName === "STATUS_CANCELED" ? "CANC" : "RINV";
+        else if (stateType === "canceled") statusTxt = statusName === "STATUS_CANCELED" ? "CANC" : (statusName === "STATUS_SUSPENDED" || statusName === "STATUS_ABANDONED" ? "SOSP" : "RINV");
 
         const effAvgH = isNeutral ? Number(((leagueAvgH + leagueAvgA) / 2).toFixed(3)) : leagueAvgH;
         const effAvgA = isNeutral ? effAvgH : leagueAvgA;
@@ -119,23 +123,28 @@ async function loadDay(offset, force = false) {
         const domAvgAA = isNeutral ? domAvgAH : safeNum(domStdA?.avgA, leagueAvgA);
 
         const gpH = hs ? hs.played : 0, gpA = as ? as.played : 0;
+        const hEffGp = !hs ? 0 : (isNeutral ? gpH : (hs.hGp ?? Math.max(1, Math.round(gpH / 2))));
+        const aEffGp = !as ? 0 : (isNeutral ? gpA : (as.aGp ?? Math.max(1, Math.round(gpA / 2))));
+
         const rawHGF = hs ? ((isNeutral ? hs.gfAvg : (hs.hGfAvg ?? hs.gfAvg * 1.08)) / domAvgH) * effAvgH : effAvgH;
         const rawHGA = hs ? ((isNeutral ? hs.gaAvg : (hs.hGaAvg ?? hs.gaAvg * 0.92)) / domAvgHA) * effAvgA : effAvgA;
         const rawAGF = as ? ((isNeutral ? as.gfAvg : (as.aGfAvg ?? as.gfAvg * 0.92)) / domAvgAA) * effAvgA : effAvgA;
         const rawAGA = as ? ((isNeutral ? as.gaAvg : (as.aGaAvg ?? as.gaAvg * 1.08)) / domAvgAH) * effAvgH : effAvgH;
 
-        const hGF = shrink(clamp(rawHGF, 0.35, 3.8), gpH, effAvgH, 5);
-        const hGA = shrink(clamp(rawHGA, 0.30, 3.8), gpH, effAvgA, 5);
-        const aGF = shrink(clamp(rawAGF, 0.30, 3.8), gpA, effAvgA, 5);
-        const aGA = shrink(clamp(rawAGA, 0.35, 3.8), gpA, effAvgH, 5);
+        const hGF = shrink(clamp(rawHGF, 0.35, 3.8), hEffGp, effAvgH, 5);
+        const hGA = shrink(clamp(rawHGA, 0.30, 3.8), hEffGp, effAvgA, 5);
+        const aGF = shrink(clamp(rawAGF, 0.30, 3.8), aEffGp, effAvgA, 5);
+        const aGA = shrink(clamp(rawAGA, 0.35, 3.8), aEffGp, effAvgH, 5);
 
         const hId = home.team?.id, aId = away.team?.id;
-        const tierH = (LEAGUE_TIER[hs?.domSlug || b.slug]?.s) ?? 0.88;
-        const tierA = (LEAGUE_TIER[as?.domSlug || b.slug]?.s) ?? 0.88;
+        const domSlugH = hs?.domSlug || b.slug;
+        const domSlugA = as?.domSlug || b.slug;
+        const tierH = (LEAGUE_TIER[domSlugH]?.s) ?? 0.88;
+        const tierA = (LEAGUE_TIER[domSlugA]?.s) ?? 0.88;
         const baseVol = b.slug === "fifa.friendly" ? 0.42 : (b.kind === "Nazionali" ? (ok ? 0.28 : 0.38) : (b.kind === "Coppa" ? (ok ? 0.25 : 0.37) : (ok ? 0.20 : 0.34)));
 
         const m = {
-          id: ev.id, dp, slug: b.slug, leagueId: b.slug, leagueName: b.name, kind: b.kind, flag: b.flag,
+          id: ev.id, dp, espnDp: ev._espnDp || dp, slug: b.slug, leagueId: b.slug, leagueName: b.name, kind: b.kind, flag: b.flag,
           time: timeStr, startTs, stateType, isExtra, hasScore, hScore, aScore, neutralSite: isNeutral,
           scoreStr: ((stateType === "in" || stateType === "post") && hasScore) ? `${hScore} - ${aScore}` : "- : -",
           statusTxt, homeId: hId, awayId: aId,
@@ -149,7 +158,7 @@ async function loadDay(offset, force = false) {
             hGF: Number(safeNum(hGF, effAvgH).toFixed(2)), hGA: Number(safeNum(hGA, effAvgA).toFixed(2)),
             aGF: Number(safeNum(aGF, effAvgA).toFixed(2)), aGA: Number(safeNum(aGA, effAvgH).toFixed(2)),
             hFF: hf.factor, aFF: af.factor, hL: 1.0, aL: 1.0,
-            isCrossLeague: b.kind !== "Campionato", tierH, tierA,
+            isCrossLeague: b.kind !== "Campionato", domSlugH, domSlugA, tierH, tierA,
             comp: ok ? 0.92 : (home.form && away.form ? 0.72 : 0.54), vol: baseVol
           }
         };
@@ -227,7 +236,7 @@ window.scanSeason = async totalDays => {
               const events = await ESPNProvider.fetchScoreboard(slug, dr, 250);
               events.forEach(ev => {
                 if (monthDedup.has(ev.id)) return;
-                const stType = ev.status?.type, isExtra = EXTRA_RE.test((stType?.shortDetail || "").toUpperCase());
+                const stType = ev.status?.type, isExtra = EXTRA_RE.test((stType?.shortDetail || "").toUpperCase()) || Number(ev.status?.period) > 2;
                 const comp = ev.competitions?.[0] || {};
                 const home = (comp.competitors || []).find(c => c.homeAway === "home");
                 const away = (comp.competitors || []).find(c => c.homeAway === "away");
@@ -257,14 +266,25 @@ window.scanSeason = async totalDays => {
     stEl.textContent = `Analizzo ${allEvents.length} match + calcolo rating ELO...`;
 
     const rolling = {}, leagueRoll = {}, eloMap = {}, teams = {};
-    const initRoll = () => ({ played: 0, gf: 0, ga: 0, hP: 0, hGf: 0, hGa: 0, aP: 0, aGf: 0, aGa: 0, pts: [], lastTs: 0 });
+    const initRoll = () => ({ played: 0, gf: 0, ga: 0, hP: 0, hGf: 0, hGa: 0, aP: 0, aGf: 0, aGa: 0, pts: [], res: [], lastTs: 0 });
     const getRoll = id => rolling[id] || initRoll();
     const getElo = (id, slug) => eloMap[id] ?? (LEAGUE_TIER[slug]?.elo ?? 1470);
     const formFactor = arr => !arr.length ? 1.0 : 0.88 + (arr.slice(-5).reduce((a, b) => a + b, 0) / (Math.min(5, arr.length) * 3)) * 0.24;
+    const calcRollAdj = r => {
+      if (!r.res || r.res.length < 5) return { attFactor: 1.0, defFactor: 1.0 };
+      const sl = r.res.slice(-15);
+      let rGf = 0, rGa = 0, rEgf = 0, rEga = 0;
+      sl.forEach(x => { rGf += x.gf; rGa += x.ga; rEgf += x.egf; rEga += x.ega; });
+      return {
+        attFactor: clamp((rGf + 4.0) / Math.max(1.0, rEgf + 4.0), 0.90, 1.10),
+        defFactor: clamp((rGa + 4.0) / Math.max(1.0, rEga + 4.0), 0.90, 1.10)
+      };
+    };
     const decayRoll = r => ({
       played: r.played * 0.35, gf: r.gf * 0.35, ga: r.ga * 0.35,
       hP: r.hP * 0.35, hGf: r.hGf * 0.35, hGa: r.hGa * 0.35,
-      aP: r.aP * 0.35, aGf: r.aGf * 0.35, aGa: r.aGa * 0.35, pts: r.pts.slice(-2), lastTs: r.lastTs
+      aP: r.aP * 0.35, aGf: r.aGf * 0.35, aGa: r.aGa * 0.35,
+      pts: r.pts.slice(-2), res: [], lastTs: r.lastTs
     });
 
     allEvents.forEach(rec => {
@@ -280,6 +300,7 @@ window.scanSeason = async totalDays => {
       if (hr.lastTs && (evTs - hr.lastTs) > 3888000000) hr = decayRoll(hr);
       if (ar.lastTs && (evTs - ar.lastTs) > 3888000000) ar = decayRoll(ar);
 
+      let resH = hr.res, resA = ar.res;
       if (hr.played >= 2 && ar.played >= 2) {
         const rawHGF = hr.hP >= 3 ? (hr.hGf / hr.hP) : (hr.gf / hr.played) * 1.08;
         const rawHGA = hr.hP >= 3 ? (hr.hGa / hr.hP) : (hr.ga / hr.played) * 0.92;
@@ -295,18 +316,29 @@ window.scanSeason = async totalDays => {
             aGF: shrink(rawAGF, ar.aP >= 3 ? ar.aP : ar.played, avgA, 5),
             aGA: shrink(rawAGA, ar.aP >= 3 ? ar.aP : ar.played, avgH, 5),
             hFF: formFactor(hr.pts), aFF: formFactor(ar.pts), hL: 1.0, aL: 1.0,
+            adjH: calcRollAdj(hr), adjA: calcRollAdj(ar),
             isCrossLeague: kind !== "Campionato", eloH, eloA,
             comp: hr.played >= 5 && ar.played >= 5 ? 0.91 : 0.74, vol: 0.22
           }
         };
         const pred = calcPred(fake, {}, true);
+        const lH = Number(pred.lamH), lA = Number(pred.lamA);
+        resH = [...hr.res.slice(-14), { gf: hScore, ga: aScore, egf: lH, ega: lA }];
+        resA = [...ar.res.slice(-14), { gf: aScore, ga: hScore, egf: lA, ega: lH }];
+
         const ph = isHit(pred.bestPick.code, hScore, aScore) ? 1 : 0;
         const oh = isHit(pred.ouPick.code, hScore, aScore) ? 1 : 0;
         const pr = Number(pred.bestPick.prob.toFixed(3)), cat = pred.bestPick.cat;
+        const b1x2 = Number((
+          Math.pow(pred.probs.p1 - (hScore > aScore ? 1 : 0), 2) +
+          Math.pow(pred.probs.px - (hScore === aScore ? 1 : 0), 2) +
+          Math.pow(pred.probs.p2 - (hScore < aScore ? 1 : 0), 2)
+        ).toFixed(4));
+        const bOu = Number(Math.pow(pred.probs.pO - ((hScore + aScore) >= 3 ? 1 : 0), 2).toFixed(4));
 
         const pushRec = (tid, tName, oppId, opp, isHome) => {
           if (!teams[tid]) teams[tid] = { id: tid, n: tName, elo: 1500, tot: 0, hit: 0, ou: 0, tTot: 0, tHit: 0, eg: 0, rg: 0, gf: 0, ga: 0, egf: 0, ega: 0, m: [] };
-          const t = teams[tid], lH = Number(pred.lamH), lA = Number(pred.lamA);
+          const t = teams[tid];
           const myGf = isHome ? hScore : aScore, myGa = isHome ? aScore : hScore;
           const myEgf = isHome ? lH : lA, myEga = isHome ? lA : lH;
           t.tot++; t.hit += ph; t.ou += oh;
@@ -316,7 +348,8 @@ window.scanSeason = async totalDays => {
           t.m.push({
             d: date.slice(0, 10), c: compName, k: kind, f: flag, oid: oppId, h: isHome ? 1 : 0,
             t: isHome ? `${tName} - ${opp}` : `${opp} - ${tName}`, s: `${hScore}-${aScore}`,
-            p: pred.bestPick.code, cat, pr, ph, o: pred.ouPick.code, oh, gf: myGf, ga: myGa, egf: myEgf, ega: myEga
+            p: pred.bestPick.code, cat, pr, ph, o: pred.ouPick.code, oh,
+            b1x2, bOu, gf: myGf, ga: myGa, egf: myEgf, ega: myEga
           });
         };
         pushRec(hId, hName, aId, aName, true);
@@ -332,8 +365,8 @@ window.scanSeason = async totalDays => {
       leagueRoll[slug] = { m: lr.m + 1, hGf: lr.hGf + hScore, aGf: lr.aGf + aScore };
       const hp = hScore > aScore ? 3 : hScore === aScore ? 1 : 0;
       const ap = aScore > hScore ? 3 : aScore === hScore ? 1 : 0;
-      rolling[hId] = { ...hr, played: hr.played + 1, gf: hr.gf + hScore, ga: hr.ga + aScore, hP: hr.hP + 1, hGf: hr.hGf + hScore, hGa: hr.hGa + aScore, pts: [...hr.pts, hp], lastTs: evTs };
-      rolling[aId] = { ...ar, played: ar.played + 1, gf: ar.gf + aScore, ga: ar.ga + hScore, aP: ar.aP + 1, aGf: ar.aGf + aScore, aGa: ar.aGa + hScore, pts: [...ar.pts, ap], lastTs: evTs };
+      rolling[hId] = { ...hr, played: hr.played + 1, gf: hr.gf + hScore, ga: hr.ga + aScore, hP: hr.hP + 1, hGf: hr.hGf + hScore, hGa: hr.hGa + aScore, pts: [...hr.pts, hp], res: resH, lastTs: evTs };
+      rolling[aId] = { ...ar, played: ar.played + 1, gf: ar.gf + aScore, ga: ar.ga + hScore, aP: ar.aP + 1, aGf: ar.aGf + aScore, aGa: ar.aGa + hScore, pts: [...ar.pts, ap], res: resA, lastTs: evTs };
     });
 
     Object.keys(teams).forEach(tid => { teams[tid].elo = Math.round(eloMap[tid] ?? 1500); });
@@ -373,7 +406,7 @@ function renderTeamLeaderboard() {
   const minM = Number(document.getElementById("minMatchesFilter").value), all = Object.values(raw);
   const tot = all.reduce((s, x) => s + x.tot, 0), hits = all.reduce((s, x) => s + x.hit, 0), ouHits = all.reduce((s, x) => s + x.ou, 0);
 
-  let uniqueM = 0, brierSum = 0;
+  let uniqueM = 0, brierSum = 0, b1x2Sum = 0, b1x2Cnt = 0, bOuSum = 0, bOuCnt = 0;
   const byCat = { "1X2": { n: 0, h: 0 }, "DC": { n: 0, h: 0 }, "GOALS": { n: 0, h: 0 } };
   const bins = [
     { label: "50–60%", min: 0.50, max: 0.60, n: 0, h: 0, pSum: 0 },
@@ -386,6 +419,8 @@ function renderTeamLeaderboard() {
     (t.m || []).forEach(x => {
       if (x.h !== 1 || !Number.isFinite(x.pr)) return;
       uniqueM++; brierSum += Math.pow(x.pr - x.ph, 2);
+      if (Number.isFinite(x.b1x2)) { b1x2Sum += x.b1x2; b1x2Cnt++; }
+      if (Number.isFinite(x.bOu)) { bOuSum += x.bOu; bOuCnt++; }
       if (byCat[x.cat]) { byCat[x.cat].n++; byCat[x.cat].h += x.ph; }
       const b = bins.find(bn => x.pr >= bn.min && x.pr < bn.max);
       if (b) { b.n++; b.h += x.ph; b.pSum += x.pr; }
@@ -401,6 +436,11 @@ function renderTeamLeaderboard() {
   if (uniqueM > 0) {
     calBox.classList.remove("hidden");
     const fmtCat = (label, obj) => obj.n ? `<span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">${label}: <strong class="text-white">${Math.round(obj.h / obj.n * 100)}%</strong> <span class="text-slate-500">(${obj.n})</span></span>` : "";
+    const marketBriers = (b1x2Cnt || bOuCnt)
+      ? `<div class="flex flex-wrap gap-2 text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+          ${b1x2Cnt ? `<span title="3-esiti (casuale = 0.667, buono < 0.60)">Brier 1X2: <strong class="text-cyan-300">${(b1x2Sum / b1x2Cnt).toFixed(3)}</strong></span>` : ""}
+          ${bOuCnt ? `<span title="Binario (casuale = 0.250, buono < 0.240)">Brier O/U 2.5: <strong class="text-fuchsia-300">${(bOuSum / bOuCnt).toFixed(3)}</strong></span>` : ""}
+        </div>` : "";
     calBox.innerHTML = `
       <div class="flex flex-wrap items-center justify-between gap-1.5">
         <span class="font-bold text-slate-300">🎯 Resa per Mercato:</span>
@@ -412,7 +452,7 @@ function renderTeamLeaderboard() {
           const exp = b.n ? Math.round((b.pSum / b.n) * 100) + "%" : "-";
           return `<div class="p-1.5 rounded-lg bg-slate-900/70"><div class="text-[9px] text-slate-400">Prev. ${b.label}</div><div class="font-bold text-emerald-400">${real} <span class="text-[9px] text-slate-500 font-normal">vs ${exp}</span></div></div>`;
         }).join("")}
-      </div>`;
+      </div>${marketBriers}`;
   } else {
     calBox.classList.add("hidden");
   }
@@ -484,6 +524,7 @@ function openTeamModal(tid) {
       </div>
     </div>`;
   }).join("");
+  document.body.classList.add("overflow-hidden");
   const mod = document.getElementById("detailModal");
   mod.classList.remove("hidden"); mod.classList.add("flex");
 }
@@ -508,7 +549,11 @@ function renderDiario() {
   }
 
   box.innerHTML = BET_LOG.slice().reverse().map(b => {
-    const stBadge = b.status === "won" ? `<span class="text-emerald-400 font-bold">✅ VINTA (+${(b.stake * (b.odd - 1)).toFixed(2)}u)</span>`
+    const netWon = b.stake * (b.odd - 1);
+    const stBadge = b.status === "won"
+      ? (netWon >= 0
+          ? `<span class="text-emerald-400 font-bold">✅ VINTA (+${netWon.toFixed(2)}u)</span>`
+          : `<span class="text-amber-300 font-bold">🟡 PARZIALE (${netWon.toFixed(2)}u)</span>`)
       : b.status === "lost" ? `<span class="text-rose-400 font-bold">❌ PERSA (-${b.stake.toFixed(2)}u)</span>`
       : b.status === "void" ? `<span class="text-slate-400 font-bold">↩️ RIMBORSATA</span>`
       : `<span class="text-amber-300 font-bold">⏳ IN ATTESA</span>`;
