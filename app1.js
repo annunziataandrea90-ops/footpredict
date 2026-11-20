@@ -1,4 +1,3 @@
-```javascript
 const HIST_KEY = "fp_team_hist_9m";
 const STANDINGS_KEY = "fp_standings_cache_v2";
 const BET_KEY = "fp_bet_log_v1";
@@ -20,7 +19,7 @@ const COMPS = [
   ["bra.1", "Brasileirão", "Campionato", "🇧🇷"], ["arg.1", "Liga Profesional", "Campionato", "🇦🇷"], ["usa.1", "MLS", "Campionato", "🇺🇸"]
 ];
 const AM_LEAGUES = new Set(["bra.1", "arg.1", "usa.1"]);
-const MONTH_PREFIX = `fp_m3_${COMPS.length}_`;
+const MONTH_PREFIX = "fp_m3_" + COMPS.length + "_";
 
 let TEAM_HIST_CACHE = {};
 let standingsCache = {};
