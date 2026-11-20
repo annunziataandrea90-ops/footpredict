@@ -5,13 +5,20 @@ function syncSlipFromLeagues() {
   let changed = false;
   SLIP.forEach((item, id) => {
     const m = byId.get(id);
-    if (m && !item.custom) {
-      SLIP.set(id, {
-        id: m.id, leagueId: m.leagueId, leagueName: m.leagueName,
-        home: m.home, away: m.away,
-        code: m.prediction.bestPick.code, prob: m.prediction.bestPick.prob,
-        bookOdd: item.bookOdd || null, custom: false
-      });
+    if (m) {
+      const baseUpdate = {
+        slug: m.slug, dp: m.dp, espnDp: m.espnDp, startTs: m.startTs,
+        leagueId: m.leagueId, leagueName: m.leagueName, home: m.home, away: m.away
+      };
+      if (!item.custom) {
+        SLIP.set(id, {
+          ...baseUpdate, id: m.id,
+          code: m.prediction.bestPick.code, prob: m.prediction.bestPick.prob,
+          bookOdd: item.bookOdd || null, custom: false
+        });
+      } else {
+        SLIP.set(id, { ...item, ...baseUpdate });
+      }
       changed = true;
     }
   });
@@ -27,7 +34,8 @@ function toggleSlipMatch(lid, mid, customPick = null) {
     const l = LEAGUES.find(x => x.id === lid), m = l?.matches.find(x => x.id === mid);
     if (!m) return;
     SLIP.set(mid, {
-      id: m.id, leagueId: m.leagueId, leagueName: m.leagueName, home: m.home, away: m.away,
+      id: m.id, slug: m.slug, dp: m.dp, espnDp: m.espnDp, startTs: m.startTs,
+      leagueId: m.leagueId, leagueName: m.leagueName, home: m.home, away: m.away,
       code: customPick ? customPick.code : m.prediction.bestPick.code,
       prob: customPick ? customPick.prob : m.prediction.bestPick.prob,
       bookOdd: null, custom: Boolean(customPick)
@@ -46,6 +54,31 @@ function renderSlipBar() {
   document.getElementById("slipCount").textContent = SLIP.size;
   document.getElementById("slipProb").textContent = `${(combP * 100).toFixed(1)}%`;
   document.getElementById("slipOdd").textContent = `@${fairOdd(combP)}`;
+}
+
+function nCk(n, k) {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  k = Math.min(k, n - k);
+  let res = 1;
+  for (let i = 1; i <= k; i++) res = (res * (n - k + i)) / i;
+  return Math.round(res);
+}
+
+function probAtLeastK(probs, k) {
+  const n = probs.length;
+  if (k <= 0) return 1;
+  if (k > n) return 0;
+  const dp = new Float64Array(n + 1);
+  dp[0] = 1;
+  for (let idx = 0; idx < n; idx++) {
+    const p = probs[idx];
+    for (let j = idx + 1; j >= 1; j--) dp[j] = dp[j] * (1 - p) + dp[j - 1] * p;
+    dp[0] *= (1 - p);
+  }
+  let sum = 0;
+  for (let j = k; j <= n; j++) sum += dp[j];
+  return sum;
 }
 
 function getCombinations(arr, k) {
@@ -76,16 +109,13 @@ function openSlipModal() {
   const sysOptions = [`<option value="${n}">Multipla Secca (${n}/${n} • 1 col.)</option>`];
   if (n >= 3) {
     for (let k = n - 1; k >= Math.max(2, n - 3); k--) {
-      const colCnt = getCombinations(items, k).length;
+      const colCnt = nCk(n, k);
       sysOptions.push(`<option value="${k}" ${n === 6 && k === 4 ? "selected" : (n !== 6 && k === n - 1 ? "selected" : "")}>Sistema ${k} su ${n} (${colCnt} col.)</option>`);
     }
   }
 
   document.getElementById("modalBody").innerHTML = `
-    <div class="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 flex justify-between items-center">
-      <div><div class="text-[11px] text-slate-400">Probabilità combinata (tutti presi)</div><div class="text-xl font-extrabold text-emerald-400">${(combP * 100).toFixed(1)}%</div></div>
-      <div class="text-right"><div class="text-[11px] text-slate-400">Quota equa multipla</div><div class="text-xl font-extrabold text-cyan-300">@${fairOdd(combP)}</div></div>
-    </div>
+    <div id="slipTopStats" class="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 flex justify-between items-center gap-2"></div>
 
     <div class="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/30 space-y-2.5 text-xs">
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -94,12 +124,15 @@ function openSlipModal() {
           <select id="slipSystemK" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white font-semibold">
             ${sysOptions.join("")}
           </select>
-          <input id="slipBudgetInput" type="number" min="1" max="5000" step="0.5" value="10" title="Budget totale (€)"
+          <input id="slipBudgetInput" type="number" min="1" max="5000" step="0.5" value="10" title="Budget totale (€/u)"
             class="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-white text-right font-bold" />
           <span class="text-[11px] text-slate-400">€</span>
         </div>
       </div>
       <div id="slipSystemOut" class="space-y-1.5 text-[11px]"></div>
+      <button id="logSlipBtn" class="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors">
+        💼 Registra Multipla / Sistema nel Diario
+      </button>
     </div>
 
     <div class="divide-y divide-slate-800 rounded-xl bg-slate-950 border border-slate-800">
@@ -123,14 +156,32 @@ function openSlipModal() {
     const k = Number(document.getElementById("slipSystemK").value) || curItems.length;
     const budget = Math.max(0.5, Number(document.getElementById("slipBudgetInput").value) || 10);
     const odds = curItems.map(x => (x.bookOdd && x.bookOdd > 1) ? Number(x.bookOdd) : Number(fairOdd(x.prob)));
+    const probs = curItems.map(x => x.prob);
     const avgOdd = odds.reduce((a, b) => a + b, 0) / odds.length;
-    const indexed = odds.map((o, idx) => ({ o, idx }));
+    const indexed = odds.map((o, idx) => ({ o, p: probs[idx], idx }));
     const combos = getCombinations(indexed, k);
     const colCount = combos.length;
     const colStake = budget / colCount;
     const prod = arr => arr.reduce((p, x) => p * x.o, 1);
 
+    const sysHitProb = probAtLeastK(probs, k);
+    const expReturn = colStake * combos.reduce((s, c) => s + c.reduce((pr, x) => pr * x.p * x.o, 1), 0);
+    const expEv = ((expReturn / budget) - 1) * 100;
     const winAll = colStake * combos.reduce((s, c) => s + prod(c), 0);
+
+    document.getElementById("slipTopStats").innerHTML = `
+      <div>
+        <div class="text-[11px] text-slate-400">Prob. presa sistema (≥ ${k}/${curItems.length})</div>
+        <div class="text-xl font-extrabold text-emerald-400">${(sysHitProb * 100).toFixed(1)}%</div>
+        ${k < curItems.length ? `<div class="text-[10px] text-slate-400">Tutti presi: ${(combP * 100).toFixed(1)}%</div>` : ""}
+      </div>
+      <div class="text-right">
+        <div class="text-[11px] text-slate-400">${k === curItems.length ? "Quota totale" : "EV atteso sistema"}</div>
+        <div class="text-xl font-extrabold ${k === curItems.length ? "text-cyan-300" : (expEv >= 0 ? "text-emerald-400" : "text-amber-300")}">
+          ${k === curItems.length ? `@${prod(indexed).toFixed(2)}` : `${expEv >= 0 ? "+" : ""}${expEv.toFixed(1)}%`}
+        </div>
+        <div class="text-[10px] text-slate-400">Ritorno atteso: ${expReturn.toFixed(2)} €</div>
+      </div>`;
 
     let err1Block = "";
     if (k < curItems.length) {
@@ -139,7 +190,8 @@ function openSlipModal() {
         return colStake * winningCols.reduce((s, c) => s + prod(c), 0);
       });
       const min1 = Math.min(...payouts1), max1 = Math.max(...payouts1);
-      const breakEvenOdd = Math.pow(colCount / getCombinations(curItems.slice(1), k).length, 1 / k);
+      const colsAfter1Miss = nCk(curItems.length - 1, k);
+      const breakEvenOdd = Math.pow(colCount / Math.max(1, colsAfter1Miss), 1 / k);
       const warn = avgOdd < breakEvenOdd
         ? `<div class="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px]">⚠️ Quota media (@${avgOdd.toFixed(2)}) sotto la soglia di pareggio (@${breakEvenOdd.toFixed(2)}) per 1 errore: valuta di scendere a <strong>${Math.max(2, k - 1)} su ${curItems.length}</strong>.</div>`
         : `<div class="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px]">✅ Quota media (@${avgOdd.toFixed(2)}) sopra la soglia (@${breakEvenOdd.toFixed(2)}): anche con 1 errore vai in attivo!</div>`;
@@ -183,6 +235,41 @@ function openSlipModal() {
 
   document.getElementById("slipSystemK").onchange = updateSystemCalc;
   document.getElementById("slipBudgetInput").oninput = updateSystemCalc;
+  document.getElementById("logSlipBtn").onclick = async () => {
+    const curItems = Array.from(SLIP.values());
+    const k = Number(document.getElementById("slipSystemK").value) || curItems.length;
+    const budget = Math.max(0.5, Number(document.getElementById("slipBudgetInput").value) || 10);
+    const legs = curItems.map(x => ({
+      matchId: x.id, slug: x.slug || "", dp: x.dp || dateParam(dayOffset()),
+      espnDp: x.espnDp || x.dp || dateParam(dayOffset()),
+      code: x.code, odd: (x.bookOdd && x.bookOdd > 1) ? Number(x.bookOdd) : Number(fairOdd(x.prob))
+    }));
+    const maxMult = k === curItems.length
+      ? legs.reduce((p, x) => p * x.odd, 1)
+      : getCombinations(legs, k).reduce((s, c) => s + c.reduce((p, x) => p * x.odd, 1), 0) / nCk(curItems.length, k);
+
+    BET_LOG.push({
+      id: `slip_${Date.now()}`,
+      matchId: curItems.length === 1 ? curItems[0].id : null,
+      slug: curItems.length === 1 ? (curItems[0].slug || "") : "",
+      dp: curItems[0]?.dp || dateParam(dayOffset()),
+      espnDp: curItems[0]?.espnDp || curItems[0]?.dp || dateParam(dayOffset()),
+      date: localDateKey(new Date(curItems[0]?.startTs || Date.now())),
+      league: k === curItems.length ? `Multipla (${curItems.length} ev.)` : `Sistema ${k}/${curItems.length}`,
+      match: curItems.map(x => `${x.home.split(" ")[0]}-${x.away.split(" ")[0]} (${x.code})`).join(" • "),
+      code: k === curItems.length ? `Multipla ${curItems.length}/${curItems.length}` : `Sistema ${k}/${curItems.length}`,
+      odd: Number(maxMult.toFixed(2)),
+      stake: budget,
+      status: "pending",
+      systemK: k,
+      legs
+    });
+    await saveBetLog();
+    const btn = document.getElementById("logSlipBtn");
+    btn.textContent = "✅ Registrata nel Diario!";
+    setTimeout(() => { if (document.getElementById("logSlipBtn")) document.getElementById("logSlipBtn").textContent = "💼 Registra Multipla / Sistema nel Diario"; }, 1400);
+  };
+
   document.querySelectorAll("[data-slip-odd]").forEach(inp => {
     inp.oninput = () => {
       const item = SLIP.get(inp.dataset.slipOdd);
@@ -203,6 +290,7 @@ function openSlipModal() {
   });
 
   updateSystemCalc();
+  document.body.classList.add("overflow-hidden");
   const mod = document.getElementById("detailModal");
   mod.classList.remove("hidden"); mod.classList.add("flex");
 }
@@ -229,7 +317,10 @@ function renderMatchRow(m, showLeague = false) {
     : isCanceled ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
     : "bg-slate-900/80 border-slate-800 text-slate-500";
   const ouCls = p.ouPick.isOver ? "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" : "bg-indigo-500/15 text-indigo-300 border-indigo-500/30";
-  const extraBadge = (started && m.isExtra) ? " ⏱️" : "", inSlip = SLIP.has(m.id);
+  const extraBadge = (started && m.isExtra) ? " ⏱️" : "";
+  const slipItem = SLIP.get(m.id), inSlip = Boolean(slipItem);
+  const customSlipBadge = (slipItem && slipItem.custom && slipItem.code !== p.bestPick.code)
+    ? `<span class="text-[9px] text-emerald-300 font-bold">🎟️ ${esc(slipItem.code)}</span>` : "";
 
   return `<div data-lid="${esc(m.leagueId)}" data-mid="${esc(m.id)}" class="match-card px-2.5 py-2.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-800/50 active:bg-slate-800 transition-colors ${isStar ? 'bg-emerald-500/5 border-l-2 border-l-emerald-400' : ''} ${isCanceled ? 'opacity-60' : ''}">
     <div class="min-w-0 flex-1">
@@ -238,6 +329,7 @@ function renderMatchRow(m, showLeague = false) {
         ${showLeague ? `<span class="truncate text-slate-500">${m.flag} ${esc(m.leagueName)}</span>` : ""}
         ${isStar ? '<span class="text-[9px] font-bold text-emerald-400">⭐ TOP</span>' : ''}
         ${m.lowData ? '<span class="text-[9px] text-amber-400/90" title="Pochi dati statistici">⚠️</span>' : ''}
+        ${customSlipBadge}
       </div>
       <div class="text-xs font-semibold text-white flex items-center min-w-0">${logoHtml(m.homeLogo)}<span class="truncate">${esc(m.home)}</span>${renderFormDots(m.formH)}</div>
       <div class="text-xs font-semibold text-slate-300 flex items-center min-w-0">${logoHtml(m.awayLogo)}<span class="truncate">${esc(m.away)}</span>${renderFormDots(m.formA)}</div>
@@ -254,7 +346,7 @@ function renderMatchRow(m, showLeague = false) {
       <div class="text-[10px] font-bold text-center ${cs.text}">${p.confidence}%</div>
       <div class="w-full h-1 bg-slate-900 rounded-full mt-0.5 overflow-hidden"><div class="h-full ${cs.bar}" style="width:${p.confidence}%"></div></div>
     </div>
-    <button data-slip-lid="${esc(m.leagueId)}" data-slip-mid="${esc(m.id)}" title="Aggiungi/Rimuovi da schedina"
+    <button data-slip-lid="${esc(m.leagueId)}" data-slip-mid="${esc(m.id)}" title="${inSlip ? `In schedina: ${esc(slipItem.code)}` : 'Aggiungi alla schedina'}"
       class="slip-toggle w-6 h-7 shrink-0 rounded-lg border text-xs font-bold flex items-center justify-center ${inSlip ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'}">${inSlip ? '✓' : '+'}</button>
   </div>`;
 }
@@ -336,7 +428,8 @@ function renderSchedule() {
       SLIP.clear();
       chosen.forEach(m => {
         SLIP.set(m.id, {
-          id: m.id, leagueId: m.leagueId, leagueName: m.leagueName, home: m.home, away: m.away,
+          id: m.id, slug: m.slug, dp: m.dp, espnDp: m.espnDp, startTs: m.startTs,
+          leagueId: m.leagueId, leagueName: m.leagueName, home: m.home, away: m.away,
           code: m.prediction.bestPick.code, prob: m.prediction.bestPick.prob, bookOdd: null, custom: false
         });
       });
@@ -359,6 +452,7 @@ function openModal(lid, mid) {
   document.getElementById("modalLeague").textContent = `${l.flag} ${l.name} • ${m.time}${m.neutralSite ? " • Campo Neutro" : ""}`;
   document.getElementById("modalTitle").textContent = `${m.home} vs ${m.away}`;
   renderModalStructure(m);
+  document.body.classList.add("overflow-hidden");
   const mod = document.getElementById("detailModal");
   mod.classList.remove("hidden"); mod.classList.add("flex");
   loadModalSummary(m, token);
@@ -423,7 +517,7 @@ function renderModalStructure(m) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="font-bold text-cyan-300">💰 Value &amp; Registra: <strong id="selectedMarketBadge" class="text-white"></strong></span>
         <div class="flex items-center gap-1.5">
-          <input id="bookOddInput" type="number" min="1.01" max="50" step="0.01" placeholder="Quota (es. 1.75)"
+          <input id="bookOddInput" type="number" min="1.01" max="50" step="0.01" placeholder="${fairOdd(activePick.prob)}"
             class="w-28 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-right" />
           <input id="betStakeInput" type="number" min="0.1" max="100" step="0.5" value="1" title="Unità/Euro puntati"
             class="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-right" />
@@ -450,6 +544,7 @@ function renderModalStructure(m) {
 
   const updateEV = () => {
     document.getElementById("selectedMarketBadge").textContent = `${activePick.code} (${Math.round(activePick.prob * 100)}%)`;
+    bookInput.placeholder = fairOdd(activePick.prob);
     const odd = Number(bookInput.value), evEl = document.getElementById("evResult");
     if (!Number.isFinite(odd) || odd <= 1.0) {
       evEl.innerHTML = `<span class="text-slate-400">Quota equa: <strong class="text-white">@${fairOdd(activePick.prob)}</strong>. Tocca un mercato sopra o inserisci quota book &gt; 1.00.</span>`;
@@ -492,7 +587,9 @@ function renderModalStructure(m) {
       status = isHit(activePick.code, m.hScore, m.aScore) ? "won" : "lost";
     }
     BET_LOG.push({
-      id: `${m.id}_${Date.now()}`, matchId: m.id, slug: m.slug, dp: m.dp || dateParam(dayOffset()),
+      id: `${m.id}_${Date.now()}`, matchId: m.id, slug: m.slug,
+      dp: m.dp || dateParam(dayOffset()),
+      espnDp: m.espnDp || m.dp || dateParam(dayOffset()),
       date: localDateKey(new Date(m.startTs || Date.now())),
       league: m.leagueName, match: `${m.home} vs ${m.away}`,
       code: activePick.code, odd, stake, status
@@ -582,8 +679,16 @@ function updateModalDynamic(m, ov = {}, selectedCode = null) {
 
 function closeModal() {
   currentModalToken++;
+  document.body.classList.remove("overflow-hidden");
   const mod = document.getElementById("detailModal");
   mod.classList.add("hidden"); mod.classList.remove("flex");
+}
+
+function shiftDateParam(dpStr, deltaDays) {
+  const y = Number(dpStr.slice(0, 4)), m = Number(dpStr.slice(4, 6)) - 1, d = Number(dpStr.slice(6, 8));
+  const dt = new Date(y, m, d);
+  dt.setDate(dt.getDate() + deltaDays);
+  return `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}${String(dt.getDate()).padStart(2, "0")}`;
 }
 
 document.getElementById("viewPalinsesto").addEventListener("click", e => {
@@ -620,6 +725,7 @@ document.getElementById("betLogList").addEventListener("click", async e => {
 });
 
 document.getElementById("btnAutoSettle").onclick = async () => {
+  const btn = document.getElementById("btnAutoSettle");
   const stEl = document.getElementById("diarioStatus");
   const pending = BET_LOG.filter(b => b.status === "pending");
   if (!pending.length) {
@@ -627,57 +733,101 @@ document.getElementById("btnAutoSettle").onclick = async () => {
     return;
   }
 
-  const byId = new Map();
-  const addMatch = m => {
-    if (m && m.stateType === "post" && m.hasScore && !m.isExtra) {
-      byId.set(m.id, { hScore: m.hScore, aScore: m.aScore });
-    }
-  };
-  LEAGUES.forEach(l => l.matches.forEach(addMatch));
-  Object.values(DAY_CACHE).forEach(entry => (entry.leagues || []).forEach(l => l.matches.forEach(addMatch)));
+  btn.disabled = true;
+  try {
+    const byId = new Map();
+    const addMatch = m => {
+      if (m && m.stateType === "post" && m.hasScore && !m.isExtra) {
+        byId.set(m.id, { hScore: m.hScore, aScore: m.aScore });
+      }
+    };
+    LEAGUES.forEach(l => l.matches.forEach(addMatch));
+    Object.values(DAY_CACHE).forEach(entry => (entry.leagues || []).forEach(l => l.matches.forEach(addMatch)));
 
-  const toFetch = new Map();
-  pending.forEach(b => {
-    if (!byId.has(b.matchId) && b.slug && b.dp) {
-      toFetch.set(`${b.slug}|${b.dp}`, [b.slug, b.dp]);
-    }
-  });
+    const toFetch = new Map();
+    const queueLookup = (matchId, slug, dp, espnDp) => {
+      if (!matchId || byId.has(matchId) || !slug) return;
+      const targetDp = espnDp || dp;
+      if (targetDp) toFetch.set(`${slug}|${targetDp}`, [slug, targetDp]);
+      if (!espnDp && dp && AM_LEAGUES.has(slug)) {
+        const prevDp = shiftDateParam(dp, -1);
+        toFetch.set(`${slug}|${prevDp}`, [slug, prevDp]);
+      }
+    };
 
-  if (toFetch.size) {
-    stEl.classList.remove("hidden"); stEl.textContent = `Controllo ${toFetch.size} tornei/date passate su ESPN...`;
-    await mapWithConcurrency(Array.from(toFetch.values()), 6, async ([slug, dp]) => {
-      try {
-        const events = await ESPNProvider.fetchScoreboard(slug, dp);
-        events.forEach(ev => {
-          const stType = ev.status?.type || {};
-          const isExtra = EXTRA_RE.test((stType.shortDetail || "").toUpperCase());
-          const comp = ev.competitions?.[0] || {};
-          const home = (comp.competitors || []).find(c => c.homeAway === "home");
-          const away = (comp.competitors || []).find(c => c.homeAway === "away");
-          const hasScore = home?.score !== undefined && home?.score !== "" && away?.score !== undefined && away?.score !== "";
-          if (stType.state === "post" && stType.completed !== false && !isExtra && hasScore) {
-            byId.set(ev.id, { hScore: Number(home.score), aScore: Number(away.score) });
-          }
-        });
-      } catch {}
+    pending.forEach(b => {
+      if (Array.isArray(b.legs) && b.legs.length) {
+        b.legs.forEach(leg => queueLookup(leg.matchId, leg.slug, leg.dp, leg.espnDp));
+      } else {
+        queueLookup(b.matchId, b.slug, b.dp, b.espnDp);
+      }
     });
-  }
 
-  let updated = 0;
-  pending.forEach(b => {
-    const res = byId.get(b.matchId);
-    if (res) {
-      b.status = isHit(b.code, res.hScore, res.aScore) ? "won" : "lost";
-      updated++;
+    if (toFetch.size) {
+      stEl.classList.remove("hidden"); stEl.textContent = `Controllo ${toFetch.size} tornei/date passate su ESPN...`;
+      await mapWithConcurrency(Array.from(toFetch.values()), 6, async ([slug, dp]) => {
+        try {
+          const events = await ESPNProvider.fetchScoreboard(slug, dp);
+          events.forEach(ev => {
+            const stType = ev.status?.type || {};
+            const isExtra = EXTRA_RE.test((stType.shortDetail || "").toUpperCase()) || Number(ev.status?.period) > 2;
+            const comp = ev.competitions?.[0] || {};
+            const home = (comp.competitors || []).find(c => c.homeAway === "home");
+            const away = (comp.competitors || []).find(c => c.homeAway === "away");
+            const hasScore = home?.score !== undefined && home?.score !== "" && away?.score !== undefined && away?.score !== "";
+            if (stType.state === "post" && stType.completed !== false && !isExtra && hasScore) {
+              byId.set(ev.id, { hScore: Number(home.score), aScore: Number(away.score) });
+            }
+          });
+        } catch {}
+      });
     }
-  });
 
-  stEl.classList.remove("hidden");
-  if (updated) {
-    await saveBetLog(); renderDiario();
-    stEl.textContent = `✅ Verificate e chiuse ${updated} giocate!`;
-  } else {
-    stEl.textContent = "Nessuna nuova partita terminata trovata per le giocate in attesa.";
+    let updated = 0;
+    pending.forEach(b => {
+      if (Array.isArray(b.legs) && b.legs.length) {
+        const k = Number(b.systemK) || b.legs.length;
+        const evalLegs = b.legs.map(leg => {
+          const res = byId.get(leg.matchId);
+          return res ? { ...leg, hit: isHit(leg.code, res.hScore, res.aScore) } : { ...leg, hit: null };
+        });
+        const settled = evalLegs.filter(x => x.hit !== null);
+        const misses = settled.filter(x => x.hit === false).length;
+        const maxPossibleHits = evalLegs.length - misses;
+
+        if (maxPossibleHits < k) {
+          b.status = "lost";
+          updated++;
+        } else if (settled.length === evalLegs.length) {
+          if (k === evalLegs.length) {
+            b.status = misses === 0 ? "won" : "lost";
+          } else {
+            const combos = getCombinations(evalLegs, k);
+            const colStake = b.stake / combos.length;
+            const totalReturn = combos.reduce((s, c) => s + (c.every(x => x.hit) ? colStake * c.reduce((p, x) => p * x.odd, 1) : 0), 0);
+            b.odd = Number((totalReturn / b.stake).toFixed(3));
+            b.status = totalReturn > 0 ? "won" : "lost";
+          }
+          updated++;
+        }
+      } else {
+        const res = byId.get(b.matchId);
+        if (res) {
+          b.status = isHit(b.code, res.hScore, res.aScore) ? "won" : "lost";
+          updated++;
+        }
+      }
+    });
+
+    stEl.classList.remove("hidden");
+    if (updated) {
+      await saveBetLog(); renderDiario();
+      stEl.textContent = `✅ Verificate e chiuse ${updated} giocate!`;
+    } else {
+      stEl.textContent = "Nessuna nuova partita terminata trovata per le giocate in attesa.";
+    }
+  } finally {
+    btn.disabled = false;
   }
 };
 
